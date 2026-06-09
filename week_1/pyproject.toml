@@ -1,0 +1,11 @@
+[project]
+name = "week-1"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.14.*"
+dependencies = [
+    "bs4==0.0.2",
+    "pydantic==2.13.4",
+    "ruff==0.15.*",
+]
