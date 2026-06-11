@@ -1,0 +1,2 @@
+SELECT COALESCE(AVG(LENGTH(description)), 0)
+FROM jobs
