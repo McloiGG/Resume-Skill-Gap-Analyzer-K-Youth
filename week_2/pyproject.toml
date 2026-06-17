@@ -1,0 +1,11 @@
+[project]
+name = "week-2"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = "==3.14.*"
+dependencies = [
+    "google-genai==2.8.0",
+    "pydantic==2.13.4",
+    "ruff==0.15.*",
+]
