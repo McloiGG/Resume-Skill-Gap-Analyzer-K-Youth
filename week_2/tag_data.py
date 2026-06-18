@@ -14,8 +14,7 @@ from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_URL = "data/jobs_d1.db"
-DEFAULT_MODEL = "gemini-2.5-flash-lite"
-# Reliability floor: demonstrates batching while keeping Gemini JSON batches small.
+DEFAULT_MODEL = "gemini-2.5-flash"
 DEFAULT_BATCH_SIZE = 3
 DEFAULT_MAX_RETRIES = 3
 RATE_LIMITS_PATH = BASE_DIR / "rate_limits.txt"
@@ -224,13 +223,8 @@ async def _tag_data_async(
                 skills, duplicates = _normalize_skills(tagged_row.tech_stack)
                 duplicate_count += duplicates
                 if not skills:
-                    skills = _fallback_skills_from_description(job)
-                    if skills:
-                        empty_output_count += 1
-                    else:
-                        empty_output_count += 1
-                        failed_rows.append(tagged_row.source_id)
-                        continue
+                    empty_output_count += 1
+                    skills = _fallback_skills_from_description(job) or ["Not specified"]
 
                 tech_stack = ", ".join(skills)
                 updates.append(
@@ -304,13 +298,14 @@ async def _tag_batch_with_fallback(
         fallback_skills = _fallback_skills_from_description(batch[0])
         if fallback_skills:
             print(f"[Batch {batch_index}] Using grounded fallback for Job {batch[0].source_id}")
-            return [
-                BatchTagResult(
-                    source_id=batch[0].source_id,
-                    tech_stack=fallback_skills,
-                )
-            ], tokens
-        return [], tokens
+        else:
+            fallback_skills = ["Not specified"]
+        return [
+            BatchTagResult(
+                source_id=batch[0].source_id,
+                tech_stack=fallback_skills,
+            )
+        ], tokens
 
     fallback_rows: list[BatchTagResult] = []
     fallback_tokens = tokens
