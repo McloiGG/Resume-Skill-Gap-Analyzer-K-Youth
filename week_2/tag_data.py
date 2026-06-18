@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 
 BASE_DIR = Path(__file__).resolve().parent
 DEFAULT_DB_URL = "data/jobs_d1.db"
-DEFAULT_MODEL = "gemini-2.5-flash"
+DEFAULT_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_BATCH_SIZE = 3
 DEFAULT_MAX_RETRIES = 3
 RATE_LIMITS_PATH = BASE_DIR / "rate_limits.txt"

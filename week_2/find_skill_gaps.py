@@ -15,20 +15,28 @@ from pydantic import BaseModel, Field
 
 
 BASE_DIR = Path(__file__).resolve().parent
-DEFAULT_INPUT_FILE = "data/jailbreak_resume_test.txt"
+DEFAULT_INPUT_FILE = "data/resume_d3.txt"
 FALLBACK_INPUT_FILE = "data/resume.txt"
 DEFAULT_DB_URL = "data/jobs_d1.db"
 DEFAULT_MODEL = "gemini-3.1-flash-lite"
 DEFAULT_BATCH_SIZE = 3
 DEFAULT_MAX_RETRIES = 3
 MAX_INPUT_CHARS = 100_000
-PROMPT_VERSION = "skill-gaps-v1"
+PROMPT_VERSION = "skill-gaps-v2"
 RATE_LIMITS_PATH = BASE_DIR / "rate_limits.txt"
 DB_SERVER_PATH = BASE_DIR / "db_server.py"
 QUERY_DIR = BASE_DIR / "queries"
 CACHE_DIR = BASE_DIR / ".skill_gap_cache"
 
 SLASH_EXCEPTIONS = {"a/b testing", "ci/cd"}
+SKILL_ALIASES = {
+    "data studio": {"data studio", "datastudio"},
+    "datastudio": {"data studio", "datastudio"},
+    "node.js": {"node.js", "nodejs"},
+    "nodejs": {"node.js", "nodejs"},
+    "power bi": {"power bi", "powerbi"},
+    "powerbi": {"power bi", "powerbi"},
+}
 IGNORED_SKILLS = {
     "adaptability",
     "analytical thinking",
@@ -103,11 +111,10 @@ class CacheEntry(BaseModel):
     model: str
     prompt_version: str
     results: list[GeminiJobSkills]
-    fallback: bool = False
 
 
 def find_skill_gaps(input_file_path: str, db_url: str) -> SkillGapResult:
-    """Find deterministic resume skill gaps using tagged jobs and Gemini validation."""
+    """Find skill gaps using deterministic matching and optional Gemini validation."""
     started = time.perf_counter()
     try:
         return asyncio.run(_find_skill_gaps_async(input_file_path, db_url, started))
@@ -162,15 +169,43 @@ async def _find_skill_gaps_async(
         )
 
     candidate_jobs = _remove_resume_matches(jobs, resume_text)
-    requests_per_minute, requests_per_day = _read_model_rate_limits(DEFAULT_MODEL)
-    retry_delay_seconds = calculate_retry_delay_seconds(requests_per_minute)
-    selected_batch_size = calculate_batch_size(
-        total_items=len(candidate_jobs),
-        requests_per_day=requests_per_day,
-        reliability_floor=DEFAULT_BATCH_SIZE,
+    candidate_skills_by_job = {
+        job.source_id: set(job.skills) for job in candidate_jobs
+    }
+    gaps = sorted(
+        {
+            skill
+            for skills in candidate_skills_by_job.values()
+            for skill in skills
+        }
     )
-    batches = _chunks(candidate_jobs, selected_batch_size)
+    demand_by_gap, demand_percentage_by_gap = _demand_statistics(
+        gaps,
+        candidate_skills_by_job,
+        len(jobs),
+    )
+    top_demand_gaps, demand_difference = _demand_summary(
+        demand_by_gap,
+        demand_percentage_by_gap,
+    )
 
+    errors: list[str] = []
+    validation_enabled = True
+    retry_delay_seconds = 0
+    selected_batch_size = DEFAULT_BATCH_SIZE
+    try:
+        requests_per_minute, requests_per_day = _read_model_rate_limits(DEFAULT_MODEL)
+        retry_delay_seconds = calculate_retry_delay_seconds(requests_per_minute)
+        selected_batch_size = calculate_batch_size(
+            total_items=len(candidate_jobs),
+            requests_per_day=requests_per_day,
+            reliability_floor=DEFAULT_BATCH_SIZE,
+        )
+    except Exception as exc:  # noqa: BLE001 - validation must not affect deterministic results.
+        validation_enabled = False
+        errors.append(f"[Rate Limit Error] {_short_error(exc)}")
+
+    batches = _chunks(candidate_jobs, selected_batch_size)
     baseline_tokens = sum(_estimate_tokens(_build_baseline_prompt(batch)) for batch in batches)
     optimized_tokens = sum(_estimate_tokens(_build_optimized_prompt(batch)) for batch in batches)
     prompt_reduction = _percentage_reduction(baseline_tokens, optimized_tokens)
@@ -178,26 +213,24 @@ async def _find_skill_gaps_async(
     calls_with_batching = len(batches)
     call_reduction = _percentage_reduction(calls_without_batching, calls_with_batching)
 
-    approved_by_job: dict[str, set[str]] = {}
     total_tokens = 0
     cache_hits = 0
-    errors: list[str] = []
+    gemini = None
+    types = None
+    if validation_enabled:
+        gemini, types, gemini_error = _create_gemini_client()
+        if gemini_error:
+            errors.append(gemini_error)
+            validation_enabled = False
 
-    gemini, types, gemini_error = _create_gemini_client()
-    if gemini_error:
-        errors.append(gemini_error)
+    if validation_enabled and gemini is not None and types is not None:
+        for batch_index, batch in enumerate(batches):
+            cache_key = _cache_key(resume_hash, batch)
+            cached_results = _load_cached_results(cache_key, batch)
+            if cached_results is not None:
+                cache_hits += 1
+                continue
 
-    for batch_index, batch in enumerate(batches):
-        cache_key = _cache_key(resume_hash, batch)
-        cached_results = _load_cached_results(cache_key, batch)
-        if cached_results is not None:
-            cache_hits += 1
-            _merge_approved_results(approved_by_job, cached_results)
-            continue
-
-        results: list[GeminiJobSkills] | None = None
-        used_fallback = False
-        if gemini is not None and types is not None:
             results, batch_tokens, batch_error = await _validate_batch_with_gemini(
                 batch_index=batch_index,
                 batch=batch,
@@ -209,35 +242,8 @@ async def _find_skill_gaps_async(
             total_tokens += batch_tokens
             if batch_error:
                 errors.append(batch_error)
-
-        if results is None:
-            results = [
-                GeminiJobSkills(source_id=job.source_id, skills=sorted(job.skills))
-                for job in batch
-            ]
-            used_fallback = True
-
-        _write_cache(cache_key, results, used_fallback)
-        _merge_approved_results(approved_by_job, results)
-
-    gaps = sorted(
-        {
-            skill
-            for skills in approved_by_job.values()
-            for skill in skills
-            if not _skill_in_resume(skill, resume_text)
-        }
-    )
-    demand_by_gap, demand_percentage_by_gap = _demand_statistics(
-        gaps,
-        approved_by_job,
-        len(jobs),
-    )
-    top_demand_gaps, demand_difference = _demand_summary(
-        demand_by_gap,
-        demand_percentage_by_gap,
-    )
-
+            if results is not None:
+                _write_cache(cache_key, results)
     return SkillGapResult(
         gaps=gaps,
         tokens=total_tokens,
@@ -345,9 +351,13 @@ def _skill_in_resume(skill: str, resume_text: str) -> bool:
         if normalized_skill in {"c", "c++", "c/c++"}:
             return True
 
-    escaped = re.escape(normalized_skill).replace(r"\ ", r"\s+")
-    pattern = rf"(?<![a-z0-9+#]){escaped}(?![a-z0-9+#])"
-    return re.search(pattern, resume_text, flags=re.IGNORECASE) is not None
+    aliases = SKILL_ALIASES.get(normalized_skill, {normalized_skill})
+    for alias in aliases:
+        escaped = re.escape(alias).replace(r"\ ", r"\s+")
+        pattern = rf"(?<![a-z0-9+#]){escaped}(?![a-z0-9+#])"
+        if re.search(pattern, resume_text, flags=re.IGNORECASE):
+            return True
+    return False
 
 
 def _create_gemini_client() -> tuple[Any | None, Any | None, str | None]:
@@ -486,7 +496,6 @@ def _load_cached_results(
 def _write_cache(
     cache_key: str,
     results: list[GeminiJobSkills],
-    fallback: bool,
 ) -> None:
     try:
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
@@ -495,7 +504,6 @@ def _write_cache(
             model=DEFAULT_MODEL,
             prompt_version=PROMPT_VERSION,
             results=results,
-            fallback=fallback,
         )
         with tempfile.NamedTemporaryFile(
             mode="w",
@@ -512,21 +520,14 @@ def _write_cache(
         return
 
 
-def _merge_approved_results(
-    approved_by_job: dict[str, set[str]],
-    results: list[GeminiJobSkills],
-) -> None:
-    for result in results:
-        approved_by_job.setdefault(result.source_id, set()).update(result.skills)
-
-
 def _demand_statistics(
     gaps: list[str],
-    approved_by_job: dict[str, set[str]],
+    candidate_skills_by_job: dict[str, set[str]],
     total_jobs: int,
 ) -> tuple[dict[str, int], dict[str, float]]:
     demand_by_gap = {
-        gap: sum(1 for skills in approved_by_job.values() if gap in skills) for gap in gaps
+        gap: sum(1 for skills in candidate_skills_by_job.values() if gap in skills)
+        for gap in gaps
     }
     percentages = {
         gap: round((count / total_jobs) * 100, 2) if total_jobs else 0.0
