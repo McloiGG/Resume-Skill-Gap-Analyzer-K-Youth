@@ -18,9 +18,14 @@ The tagging workflow uses Gemini because model extraction is useful for converti
 
 - Python `3.14`
 - [`uv`](https://docs.astral.sh/uv/) for dependency and environment management
-- Git
 - A Gemini API key from Google AI Studio
 - Ollama for optional local model experiments in `prompt_model.py`
+
+### Operating System Compatibility
+
+The Week 2 implementation is cross-platform by design and can run on Windows, macOS, and Linux. It uses `pathlib` for filesystem paths, Python's standard SQLite library inside the MCP server, FastMCP standard-input/output transport, and HTTP APIs for Gemini and Ollama. It does not depend on Windows path separators or Windows-only Python APIs.
+
+The project was developed primarily on Windows. On macOS and Linux, install the same prerequisites and use the shell-specific environment-variable and file-removal commands shown below. Ollama availability and hardware performance vary by operating system and machine.
 
 ### Install Dependencies
 
@@ -34,13 +39,15 @@ uv sync
 The Week 2 dependencies declared in `pyproject.toml` are:
 
 - `google-genai==2.8.0`: Gemini API client
-- `fastmcp>=3.4.2`: MCP client and SQLite server
+- `fastmcp==3.4.2`: MCP client and SQLite server
 - `pydantic==2.13.4`: structured result and response validation
 - `ruff==0.15.*`: linting and static checks
 
 ### Configure Gemini
 
-Set either supported environment variable in PowerShell:
+Set either `GEMINI_API_KEY` or `GOOGLE_API_KEY` in the current shell.
+
+Windows PowerShell:
 
 ```powershell
 $env:GEMINI_API_KEY = "your-api-key"
@@ -52,9 +59,21 @@ or:
 $env:GOOGLE_API_KEY = "your-api-key"
 ```
 
-Do not commit API keys or `.env` files.
+macOS/Linux with Bash or Zsh:
 
-The default model used by both `tag_data.py` and optional skill-gap validation is `gemini-3.1-flash-lite`. Its configured rate limits are read from `rate_limits.txt` rather than being hard-coded into the workflow.
+```bash
+export GEMINI_API_KEY="your-api-key"
+```
+
+or:
+
+```bash
+export GOOGLE_API_KEY="your-api-key"
+```
+
+These commands configure only the current shell session. Do not commit API keys or `.env` files.
+
+The default model used by both `tag_data.py` and `find-skill-gaps.py` is `gemini-3.1-flash-lite`. Its configured rate limits are read from `rate_limits.txt` rather than being hard-coded into the workflow.
 
 ### Configure Ollama
 
@@ -73,7 +92,19 @@ Example models used during development include:
 - `phi4-mini`
 - `qwen3.5:4b`
 
-No Ollama Python package is required. The script calls the Ollama HTTP API at `http://127.0.0.1:11434` by default. Set `OLLAMA_HOST` to override that address.
+No Ollama Python package is required. The script calls the Ollama HTTP API at `http://127.0.0.1:11434` by default. Override it when necessary:
+
+Windows PowerShell:
+
+```powershell
+$env:OLLAMA_HOST = "http://127.0.0.1:11434"
+```
+
+macOS/Linux:
+
+```bash
+export OLLAMA_HOST="http://127.0.0.1:11434"
+```
 
 ## Usage
 
@@ -308,11 +339,21 @@ uv run find_skill_gaps.py
 uv run find_skill_gaps.py
 ```
 
-For stronger cache-independent verification:
+For stronger cache-independent verification, run once, delete the validation cache, and run again.
+
+Windows PowerShell:
 
 ```powershell
 uv run find_skill_gaps.py
 Remove-Item -Recurse -Force .skill_gap_cache
+uv run find_skill_gaps.py
+```
+
+macOS/Linux:
+
+```bash
+uv run find_skill_gaps.py
+rm -rf .skill_gap_cache
 uv run find_skill_gaps.py
 ```
 
