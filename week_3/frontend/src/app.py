@@ -14,7 +14,18 @@ from pydantic import BaseModel, Field
 
 
 FRONTEND_DIR = Path(__file__).resolve().parents[1]
-REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def _find_repo_root() -> Path:
+    for parent in Path(__file__).resolve().parents:
+        if (parent / "week_1").exists() and (parent / "week_3").exists():
+            return parent
+    if FRONTEND_DIR.parent.name == "week_3":
+        return FRONTEND_DIR.parent.parent
+    return FRONTEND_DIR
+
+
+REPO_ROOT = _find_repo_root()
 DEFAULT_BACKEND_URL = "/api/chat"
 DEFAULT_BACKEND_INTERNAL_URL = "http://127.0.0.1:8001/chat"
 DEFAULT_WEEK1_DB_PATH = REPO_ROOT / "week_1" / "data" / "3_gold" / "jobs.db"

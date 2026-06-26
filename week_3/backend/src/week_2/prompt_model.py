@@ -13,7 +13,6 @@ OLLAMA_MODEL_ALIASES = {
     "qwen3.5": "qwen3.5:4b",
 }
 REQUEST_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))
-OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "192"))
 
 
 def prompt_model(model: str, prompt: str, num_predict: int | None = None) -> str:
@@ -32,15 +31,18 @@ def prompt_model(model: str, prompt: str, num_predict: int | None = None) -> str
 def _prompt_ollama(model: str, prompt: str, num_predict: int | None) -> str:
     try:
         resolved_model = _resolve_ollama_model(model)
+        payload = {
+            "model": resolved_model,
+            "prompt": prompt,
+            "stream": False,
+            "think": False,
+        }
+        if num_predict is not None:
+            payload["options"] = {"num_predict": num_predict}
+
         response = _post_ollama_json(
             "/api/generate",
-            {
-                "model": resolved_model,
-                "prompt": prompt,
-                "stream": False,
-                "think": False,
-                "options": {"num_predict": num_predict or OLLAMA_NUM_PREDICT},
-            },
+            payload,
         )
         text = response.get("response")
         if not isinstance(text, str):

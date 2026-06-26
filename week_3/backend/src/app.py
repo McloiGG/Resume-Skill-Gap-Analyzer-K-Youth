@@ -203,7 +203,7 @@ def _build_chat_prompt(payload: ChatRequest) -> str:
     pdf_text = _normalize_pdf_text(payload.pdf_text)
     pdf_section = f"\nResume PDF text:\n{pdf_text[:3000]}" if pdf_text else ""
     return (
-        "Answer in under 160 words. "
+        "Answer the user directly and completely. "
         "If asked to summarize a resume, summarize only the provided resume text. "
         "If asked to summarize a resume but no resume text is provided, ask the user to upload "
         "or paste the resume. Do not perform skill-gap analysis unless the user asks for it.\n"
@@ -257,7 +257,7 @@ def _build_skill_gap_answer_prompt(payload: ChatRequest, result: SkillGapResult)
         "Do not invent job counts, skills, or resume experience. If the resume is not technical, "
         "explain that tactfully and frame the gaps as a transition path. If there is no resume, "
         "say the advice is based on the job database and target role only. "
-        "Do not output JSON. Keep the answer under 180 words and make it actionable.\n\n"
+        "Do not output JSON. Make the answer actionable and complete.\n\n"
         f"User message:\n{message}"
         f"{pdf_section}\n\n"
         f"Skill-gap JSON:\n{gap_json}"
@@ -274,7 +274,7 @@ def _model_failure_response(result: SkillGapResult) -> str:
     ranked_gaps = sorted(
         result.demand_by_gap.items(),
         key=lambda item: (-item[1], item[0]),
-    )[:25]
+    )
     gap_list = " - ".join(skill for skill, _count in ranked_gaps)
     return f"Skills gap identified: - {gap_list}"
 
@@ -320,7 +320,7 @@ def chat(payload: ChatRequest) -> ChatResponse:
 
     if route == ROUTE_CHAT:
         chat_error = None
-        response = prompt_model(model, _build_chat_prompt(payload), num_predict=192)
+        response = prompt_model(model, _build_chat_prompt(payload))
         if response.startswith("[Ollama Error]") or response.startswith("[Input Error]"):
             chat_error = response
             if _is_simple_greeting(payload.message):
@@ -352,7 +352,6 @@ def chat(payload: ChatRequest) -> ChatResponse:
     explanation = prompt_model(
         model,
         _build_skill_gap_answer_prompt(payload, skill_gap_result),
-        num_predict=192,
     )
     answer_error = None
     if explanation.startswith("[Ollama Error]") or explanation.startswith("[Input Error]"):

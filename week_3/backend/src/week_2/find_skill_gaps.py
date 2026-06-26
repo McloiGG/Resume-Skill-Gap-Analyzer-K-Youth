@@ -284,7 +284,7 @@ def _extract_resume_skills_with_ollama(
     except ImportError:
         from prompt_model import prompt_model
 
-    response_text = prompt_model(model, prompt)
+    response_text = prompt_model(model, prompt, num_predict=256)
     if response_text.startswith("[Ollama Error]") or response_text.startswith("[Input Error]"):
         return None, f"[Ollama Skill Extraction Error] {response_text}"
 

@@ -114,7 +114,6 @@ Important backend variables:
 - `OLLAMA_HOST`: Ollama server URL.
 - `OLLAMA_MODEL`: local model name, default `qwen3.5:4b`.
 - `OLLAMA_TIMEOUT_SECONDS`: timeout for local model requests.
-- `OLLAMA_NUM_PREDICT`: default maximum output tokens for local model responses.
 
 Optional Docker secrets wiring is available in `week_3/docker-compose.secrets.yml`. It is not required for the normal local run.
 
