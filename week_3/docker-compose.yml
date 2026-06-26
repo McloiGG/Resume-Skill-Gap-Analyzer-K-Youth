@@ -10,9 +10,7 @@ services:
       BACKEND_INTERNAL_URL: http://backend:8001/chat
       WEEK1_DB_PATH: /data/week1/jobs.db
     volumes:
-      - ../week_1/data/3_gold/jobs.db:/data/week1/jobs.db:ro
-    depends_on:
-      - backend
+      - ../week_1/data/3_gold:/data/week1:ro
     networks:
       - week3
 
@@ -24,9 +22,7 @@ services:
       - "8001:8001"
     environment:
       OLLAMA_HOST: http://ollama:11434
-      OLLAMA_MODEL: qwen3.5:4b
-    depends_on:
-      - ollama
+      OLLAMA_MODEL: deepseek-r1:1.5b
     networks:
       - week3
 

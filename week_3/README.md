@@ -24,7 +24,7 @@ Install these before running the project:
 - Docker Desktop
 - `uv`
 - Python `3.14.*`
-- A local Ollama-compatible model, defaulting to `qwen3.5:4b`
+- A local Ollama-compatible model, defaulting to `deepseek-r1:1.5b`
 
 Docker Desktop must be running before Docker or Docker Compose commands will work.
 
@@ -56,10 +56,14 @@ The Compose stack contains:
 - `backend`, published on host port `8001` for course testing and debugging
 - `ollama`, available inside the Docker network at `http://ollama:11434`
 
+Each service can also start by itself. The frontend still serves `/`, `/chat`, and
+`/dashboard` if the backend, Ollama, or Week 1 database is missing; unavailable
+features return clear fallback messages instead of stopping the container.
+
 If the Ollama container does not already have the model, pull it after the stack starts:
 
 ```powershell
-docker compose exec ollama ollama pull qwen3.5:4b
+docker compose exec ollama ollama pull deepseek-r1:1.5b
 ```
 
 ### Manual uv Setup
@@ -112,7 +116,7 @@ Important backend variables:
 
 - `WEEK2_DB_PATH`: path to the copied Week 2 jobs SQLite database.
 - `OLLAMA_HOST`: Ollama server URL.
-- `OLLAMA_MODEL`: local model name, default `qwen3.5:4b`.
+- `OLLAMA_MODEL`: local model name, default `deepseek-r1:1.5b`.
 - `OLLAMA_TIMEOUT_SECONDS`: timeout for local model requests.
 
 Optional Docker secrets wiring is available in `week_3/docker-compose.secrets.yml`. It is not required for the normal local run.
@@ -199,7 +203,7 @@ Response body:
     "sql": 3
   },
   "top_demand_gaps": ["aws", "sql"],
-  "model": "qwen3.5:4b",
+  "model": "deepseek-r1:1.5b",
   "error": null,
   "intent": "find_skill_gaps",
   "used_skill_gap_analysis": true

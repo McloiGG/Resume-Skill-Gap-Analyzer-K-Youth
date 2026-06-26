@@ -66,6 +66,22 @@ def _backend_proxy_url() -> str:
     return DEFAULT_BACKEND_INTERNAL_URL
 
 
+def _backend_unavailable_response(detail: str) -> dict[str, Any]:
+    return {
+        "response": (
+            "Backend service is not available right now. The frontend container is running, "
+            "but chat analysis needs the backend service to be started."
+        ),
+        "gaps": [],
+        "demand_by_gap": {},
+        "top_demand_gaps": [],
+        "model": "unavailable",
+        "error": detail,
+        "intent": "backend_unavailable",
+        "used_skill_gap_analysis": False,
+    }
+
+
 def _post_backend_chat(payload: ChatRequest) -> dict[str, Any]:
     request = urllib.request.Request(
         _backend_proxy_url(),
@@ -80,15 +96,11 @@ def _post_backend_chat(payload: ChatRequest) -> dict[str, Any]:
             content_type = response.headers.get("content-type", "")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
-        raise HTTPException(
-            status_code=502,
-            detail=f"Backend returned HTTP {exc.code}: {detail}",
-        ) from exc
+        return _backend_unavailable_response(
+            f"Backend returned HTTP {exc.code}: {detail}",
+        )
     except urllib.error.URLError as exc:
-        raise HTTPException(
-            status_code=502,
-            detail=f"Backend is unavailable: {exc.reason}",
-        ) from exc
+        return _backend_unavailable_response(f"Backend is unavailable: {exc.reason}")
 
     if "application/json" in content_type:
         parsed_body = json.loads(body)
@@ -101,7 +113,7 @@ def _post_backend_chat(payload: ChatRequest) -> dict[str, Any]:
 
 def _connect_to_jobs_db() -> sqlite3.Connection:
     db_path = _resolve_week1_db_path()
-    if not db_path.exists():
+    if not db_path.is_file():
         raise HTTPException(
             status_code=404,
             detail=f"Week 1 database not found at {db_path}",
@@ -110,6 +122,32 @@ def _connect_to_jobs_db() -> sqlite3.Connection:
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     return connection
+
+
+def _empty_jobs_summary() -> dict[str, object]:
+    return {
+        "total_jobs": 0,
+        "total_companies": 0,
+        "top_company": None,
+        "database_path": str(_resolve_week1_db_path()),
+        "database_available": False,
+        "charts": {
+            "top_companies": {"labels": [], "counts": []},
+            "job_distribution": {
+                "labels": [
+                    "AI / ML",
+                    "Data",
+                    "Backend",
+                    "Software",
+                    "QA / Testing",
+                    "Automation",
+                    "Support / Admin",
+                    "Other",
+                ],
+                "counts": [0, 0, 0, 0, 0, 0, 0, 0],
+            },
+        },
+    }
 
 
 def _clean_text(value: object) -> str:
@@ -226,6 +264,9 @@ def dashboard(request: Request) -> HTMLResponse:
 
 @app.get("/api/jobs/summary")
 def jobs_summary() -> dict[str, object]:
+    if not _resolve_week1_db_path().is_file():
+        return _empty_jobs_summary()
+
     with _connect_to_jobs_db() as connection:
         total_jobs = int(connection.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
         total_companies = int(
@@ -260,6 +301,7 @@ def jobs_summary() -> dict[str, object]:
             "total_companies": total_companies,
             "top_company": top_company,
             "database_path": str(_resolve_week1_db_path()),
+            "database_available": True,
             "charts": {
                 "top_companies": _fetch_top_companies(connection),
                 "job_distribution": _fetch_job_distribution(connection),
@@ -272,6 +314,14 @@ def search_jobs(
     q: str = "",
     limit: int = Query(default=25, ge=1, le=50),
 ) -> dict[str, object]:
+    if not _resolve_week1_db_path().is_file():
+        return {
+            "query": q,
+            "count": 0,
+            "database_available": False,
+            "jobs": [],
+        }
+
     search_term = f"%{q.strip()}%"
     sql = """
         SELECT source_id, job_title, company, description, tech_stack, quality
@@ -297,6 +347,7 @@ def search_jobs(
     return {
         "query": q,
         "count": len(rows),
+        "database_available": True,
         "jobs": [
             {
                 "source_id": _clean_text(row["source_id"]),

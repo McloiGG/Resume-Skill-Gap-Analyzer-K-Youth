@@ -1,4 +1,7 @@
-data/
+data/*
+!data/3_gold/
+data/3_gold/*
+!data/3_gold/jobs.db
 src/__pycache__/
 __pycache__/
 .ruff_cache/

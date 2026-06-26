@@ -18,7 +18,7 @@ from week_2.prompt_model import prompt_model
 BACKEND_ROOT = Path(__file__).resolve().parents[1]
 SRC_DIR = Path(__file__).resolve().parent
 DEFAULT_WEEK2_DB_PATH = SRC_DIR / "week_2" / "data" / "jobs_d1.db"
-DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
+DEFAULT_OLLAMA_MODEL = "deepseek-r1:1.5b"
 ROUTE_FIND_SKILL_GAPS = "find_skill_gaps"
 ROUTE_CHAT = "chat"
 ROUTE_CLARIFICATION = "clarification"
@@ -325,8 +325,9 @@ def chat(payload: ChatRequest) -> ChatResponse:
             chat_error = response
             if _is_simple_greeting(payload.message):
                 response = (
-                    "Hello. I can chat normally, summarize a pasted or uploaded resume, "
-                    "or analyze skill gaps from a resume."
+                    "The local model did not respond, so this is the fallback reply. "
+                    "I can chat normally, summarize a pasted or uploaded resume, "
+                    "or analyze skill gaps from a resume once Ollama is ready."
                 )
             else:
                 response = "The local model could not answer that chat request."
