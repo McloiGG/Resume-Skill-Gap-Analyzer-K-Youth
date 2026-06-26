@@ -1,0 +1,44 @@
+services:
+  frontend:
+    build:
+      context: ./frontend
+    image: week3-frontend:1.0
+    ports:
+      - "8000:8000"
+    environment:
+      BACKEND_URL: /api/chat
+      BACKEND_INTERNAL_URL: http://backend:8001/chat
+      WEEK1_DB_PATH: /data/week1/jobs.db
+    volumes:
+      - ../week_1/data/3_gold/jobs.db:/data/week1/jobs.db:ro
+    depends_on:
+      - backend
+    networks:
+      - week3
+
+  backend:
+    build:
+      context: ./backend
+    image: week3-backend:1.0
+    ports:
+      - "8001:8001"
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+      OLLAMA_MODEL: qwen3.5:4b
+    depends_on:
+      - ollama
+    networks:
+      - week3
+
+  ollama:
+    image: ollama/ollama:latest
+    volumes:
+      - ollama-data:/root/.ollama
+    networks:
+      - week3
+
+networks:
+  week3:
+
+volumes:
+  ollama-data:

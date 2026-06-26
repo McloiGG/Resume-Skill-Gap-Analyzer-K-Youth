@@ -41,37 +41,39 @@ The Week 2 dependencies declared in `pyproject.toml` are:
 - `google-genai==2.8.0`: Gemini API client
 - `fastmcp==3.4.2`: MCP client and SQLite server
 - `pydantic==2.13.4`: structured result and response validation
+- `python-dotenv==1.2.2`: local `.env` file loading
 - `ruff==0.15.*`: linting and static checks
 
 ### Configure Gemini
 
-Set either `GEMINI_API_KEY` or `GOOGLE_API_KEY` in the current shell.
+The Week 2 scripts automatically load environment variables from `week_2/.env`.
+
+Create the file from the example:
 
 Windows PowerShell:
 
 ```powershell
-$env:GEMINI_API_KEY = "your-api-key"
+Copy-Item .env.example .env
 ```
 
-or:
+Then edit `.env` and set either `GEMINI_API_KEY` or `GOOGLE_API_KEY`:
 
-```powershell
-$env:GOOGLE_API_KEY = "your-api-key"
+```env
+GEMINI_API_KEY=your-api-key
+# GOOGLE_API_KEY=your-api-key
 ```
 
 macOS/Linux with Bash or Zsh:
 
 ```bash
-export GEMINI_API_KEY="your-api-key"
+cp .env.example .env
 ```
 
-or:
+Then edit `.env` with the same key value.
 
-```bash
-export GOOGLE_API_KEY="your-api-key"
-```
+Shell environment variables still work and take precedence if already set, but they are no longer required for normal local runs.
 
-These commands configure only the current shell session. Do not commit API keys or `.env` files.
+Do not commit API keys or `.env` files.
 
 The default model used by both `tag_data.py` and `find-skill-gaps.py` is `gemini-3.1-flash-lite`. Its configured rate limits are read from `rate_limits.txt` rather than being hard-coded into the workflow.
 

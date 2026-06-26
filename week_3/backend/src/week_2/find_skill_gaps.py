@@ -1,44 +1,46 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
-import math
 import os
 import re
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
-from dotenv import load_dotenv
 from pydantic import BaseModel, Field
 
 
 BASE_DIR = Path(__file__).resolve().parent
-load_dotenv(BASE_DIR / ".env")
-
 DEFAULT_INPUT_FILE = "data/resume_d3.txt"
 FALLBACK_INPUT_FILE = "data/resume.txt"
 DEFAULT_DB_URL = "data/jobs_d1.db"
-DEFAULT_MODEL = "gemini-3.1-flash-lite"
+DEFAULT_OLLAMA_MODEL = "qwen3.5:4b"
 DEFAULT_BATCH_SIZE = 3
-DEFAULT_MAX_RETRIES = 3
 MAX_INPUT_CHARS = 100_000
-PROMPT_VERSION = "skill-gaps-v2"
-RATE_LIMITS_PATH = BASE_DIR / "rate_limits.txt"
 DB_SERVER_PATH = BASE_DIR / "db_server.py"
 QUERY_DIR = BASE_DIR / "queries"
-CACHE_DIR = BASE_DIR / ".skill_gap_cache"
 
 SLASH_EXCEPTIONS = {"a/b testing", "ci/cd"}
 SKILL_ALIASES = {
+    "amazon web services": {"amazon web services", "aws", "ec2", "s3"},
+    "api development": {"api development", "rest api", "rest apis", "restful api", "restful apis"},
+    "aws": {"amazon web services", "aws", "ec2", "s3"},
+    "containerization": {"containerization", "containerized services", "containers", "docker"},
     "data studio": {"data studio", "datastudio"},
     "datastudio": {"data studio", "datastudio"},
+    "docker": {"containerization", "containerized services", "containers", "docker"},
+    "fast api": {"fast api", "fastapi"},
+    "fastapi": {"fast api", "fastapi"},
     "node.js": {"node.js", "nodejs"},
     "nodejs": {"node.js", "nodejs"},
+    "postgres": {"postgres", "postgresql"},
+    "postgresql": {"postgres", "postgresql"},
     "power bi": {"power bi", "powerbi"},
     "powerbi": {"power bi", "powerbi"},
+    "rest api": {"api development", "rest api", "rest apis", "restful api", "restful apis"},
+    "rest apis": {"api development", "rest api", "rest apis", "restful api", "restful apis"},
+    "restful api": {"api development", "rest api", "rest apis", "restful api", "restful apis"},
 }
 IGNORED_SKILLS = {
     "adaptability",
@@ -80,6 +82,7 @@ CONTROL_CHARACTERS = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 
 class SkillGapResult(BaseModel):
     gaps: list[str]
+    matched_resume_skills: list[str] = Field(default_factory=list)
     tokens: int = 0
     time: float = 0.0
     demand_by_gap: dict[str, int] = Field(default_factory=dict)
@@ -104,20 +107,8 @@ class JobSkills(BaseModel):
     skills: list[str]
 
 
-class GeminiJobSkills(BaseModel):
-    source_id: str
-    skills: list[str]
-
-
-class CacheEntry(BaseModel):
-    cache_key: str
-    model: str
-    prompt_version: str
-    results: list[GeminiJobSkills]
-
-
 def find_skill_gaps(input_file_path: str, db_url: str) -> SkillGapResult:
-    """Find skill gaps using deterministic matching and optional Gemini validation."""
+    """Find skill gaps using local Ollama extraction with deterministic fallback."""
     started = time.perf_counter()
     try:
         return asyncio.run(_find_skill_gaps_async(input_file_path, db_url, started))
@@ -138,7 +129,6 @@ async def _find_skill_gaps_async(
         return _error_result(started, f"[Database Error] Database file not found: {db_path}")
 
     resume_text, input_truncated, jailbreak_matches = _read_and_sanitize_resume(input_path)
-    resume_hash = hashlib.sha256(resume_text.encode("utf-8")).hexdigest()
 
     try:
         from fastmcp import Client
@@ -171,7 +161,21 @@ async def _find_skill_gaps_async(
             input_truncated=input_truncated,
         )
 
-    candidate_jobs = _remove_resume_matches(jobs, resume_text)
+    known_skills = sorted({skill for job in jobs for skill in job.skills})
+    resume_skills, extraction_error = _extract_resume_skills_with_ollama(
+        resume_text,
+        known_skills,
+    )
+
+    errors: list[str] = []
+    if resume_skills is None:
+        errors.append(extraction_error or "[Ollama Skill Extraction Error] Unknown failure.")
+        candidate_jobs = _remove_resume_matches(jobs, resume_text)
+        matched_resume_skills = _deterministic_resume_skills(known_skills, resume_text)
+    else:
+        candidate_jobs = _remove_resume_matches_from_skills(jobs, resume_skills)
+        matched_resume_skills = sorted(resume_skills)
+
     candidate_skills_by_job = {
         job.source_id: set(job.skills) for job in candidate_jobs
     }
@@ -192,22 +196,7 @@ async def _find_skill_gaps_async(
         demand_percentage_by_gap,
     )
 
-    errors: list[str] = []
-    validation_enabled = True
-    retry_delay_seconds = 0
     selected_batch_size = DEFAULT_BATCH_SIZE
-    try:
-        requests_per_minute, requests_per_day = _read_model_rate_limits(DEFAULT_MODEL)
-        retry_delay_seconds = calculate_retry_delay_seconds(requests_per_minute)
-        selected_batch_size = calculate_batch_size(
-            total_items=len(candidate_jobs),
-            requests_per_day=requests_per_day,
-            reliability_floor=DEFAULT_BATCH_SIZE,
-        )
-    except Exception as exc:  # noqa: BLE001 - validation must not affect deterministic results.
-        validation_enabled = False
-        errors.append(f"[Rate Limit Error] {_short_error(exc)}")
-
     batches = _chunks(candidate_jobs, selected_batch_size)
     baseline_tokens = sum(_estimate_tokens(_build_baseline_prompt(batch)) for batch in batches)
     optimized_tokens = sum(_estimate_tokens(_build_optimized_prompt(batch)) for batch in batches)
@@ -218,37 +207,9 @@ async def _find_skill_gaps_async(
 
     total_tokens = 0
     cache_hits = 0
-    gemini = None
-    types = None
-    if validation_enabled:
-        gemini, types, gemini_error = _create_gemini_client()
-        if gemini_error:
-            errors.append(gemini_error)
-            validation_enabled = False
-
-    if validation_enabled and gemini is not None and types is not None:
-        for batch_index, batch in enumerate(batches):
-            cache_key = _cache_key(resume_hash, batch)
-            cached_results = _load_cached_results(cache_key, batch)
-            if cached_results is not None:
-                cache_hits += 1
-                continue
-
-            results, batch_tokens, batch_error = await _validate_batch_with_gemini(
-                batch_index=batch_index,
-                batch=batch,
-                gemini=gemini,
-                types=types,
-                retry_delay_seconds=retry_delay_seconds,
-                max_retries=DEFAULT_MAX_RETRIES,
-            )
-            total_tokens += batch_tokens
-            if batch_error:
-                errors.append(batch_error)
-            if results is not None:
-                _write_cache(cache_key, results)
     return SkillGapResult(
         gaps=gaps,
+        matched_resume_skills=matched_resume_skills,
         tokens=total_tokens,
         time=_elapsed_seconds(started),
         demand_by_gap=demand_by_gap,
@@ -311,6 +272,92 @@ def _normalize_jobs(rows: Any) -> list[JobSkills]:
     return jobs
 
 
+def _extract_resume_skills_with_ollama(
+    resume_text: str,
+    known_skills: list[str],
+) -> tuple[set[str] | None, str | None]:
+    model = os.getenv("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+    prompt = _build_resume_skill_extraction_prompt(resume_text, known_skills)
+
+    try:
+        from week_2.prompt_model import prompt_model
+    except ImportError:
+        from prompt_model import prompt_model
+
+    response_text = prompt_model(model, prompt)
+    if response_text.startswith("[Ollama Error]") or response_text.startswith("[Input Error]"):
+        return None, f"[Ollama Skill Extraction Error] {response_text}"
+
+    try:
+        raw_skills = _parse_skill_extraction_response(response_text)
+    except ValueError as exc:
+        return None, f"[Ollama Skill Extraction Error] {_short_error(exc)}"
+
+    if not raw_skills:
+        return None, "[Ollama Skill Extraction Error] Ollama returned no resume skills."
+
+    extracted_skills = _normalize_extracted_skills(raw_skills, known_skills)
+    if not extracted_skills:
+        return None, "[Ollama Skill Extraction Error] No extracted skills matched known job skills."
+
+    return extracted_skills, None
+
+
+def _build_resume_skill_extraction_prompt(resume_text: str, known_skills: list[str]) -> str:
+    del known_skills
+    return (
+        "Extract demonstrated technical skills, tools, platforms, databases, frameworks, "
+        "and engineering practices from this resume text.\n"
+        'Return JSON only with this schema: {"skills":["normalized skill label"]}.\n'
+        "Use concise lowercase labels. Normalize equivalent evidence: containerized "
+        "services -> docker; EC2 or S3 -> aws; REST service endpoints -> rest apis; "
+        "CI pipelines -> ci/cd; Fast API -> fastapi; Postgres -> postgresql. "
+        "Do not include soft skills or unsupported guesses.\n\n"
+        f"Resume text:\n{resume_text[:6000]}"
+    )
+
+
+def _parse_skill_extraction_response(response_text: str) -> list[str]:
+    payload_text = response_text.strip()
+    try:
+        payload = json.loads(payload_text)
+    except json.JSONDecodeError:
+        start = payload_text.find("{")
+        end = payload_text.rfind("}")
+        if start == -1 or end == -1 or end <= start:
+            start = payload_text.find("[")
+            end = payload_text.rfind("]")
+        if start == -1 or end == -1 or end <= start:
+            raise ValueError("Ollama did not return JSON.") from None
+        payload = json.loads(payload_text[start : end + 1])
+
+    if isinstance(payload, dict):
+        payload = payload.get("skills", [])
+    if not isinstance(payload, list):
+        raise ValueError("Ollama JSON response must contain a skills list.")
+    if not all(isinstance(skill, str) for skill in payload):
+        raise ValueError("Ollama skills must be strings.")
+    return payload
+
+
+def _normalize_extracted_skills(raw_skills: list[str], known_skills: list[str]) -> set[str]:
+    known_skill_set = set(known_skills)
+    alias_to_skill: dict[str, str] = {}
+    for skill in known_skills:
+        alias_to_skill[_clean_skill(skill)] = skill
+        for alias in SKILL_ALIASES.get(skill, {skill}):
+            alias_to_skill[_clean_skill(alias)] = skill
+
+    extracted_skills: set[str] = set()
+    for raw_skill in raw_skills:
+        cleaned_skill = _clean_skill(raw_skill)
+        if cleaned_skill in known_skill_set:
+            extracted_skills.add(cleaned_skill)
+        elif cleaned_skill in alias_to_skill:
+            extracted_skills.add(alias_to_skill[cleaned_skill])
+    return extracted_skills
+
+
 def _normalize_tech_stack(tech_stack: str) -> list[str]:
     normalized: set[str] = set()
     for raw_skill in tech_stack.split(","):
@@ -345,6 +392,22 @@ def _remove_resume_matches(jobs: list[JobSkills], resume_text: str) -> list[JobS
     return candidate_jobs
 
 
+def _remove_resume_matches_from_skills(
+    jobs: list[JobSkills],
+    resume_skills: set[str],
+) -> list[JobSkills]:
+    candidate_jobs: list[JobSkills] = []
+    for job in jobs:
+        candidates = sorted(skill for skill in job.skills if skill not in resume_skills)
+        if candidates:
+            candidate_jobs.append(JobSkills(source_id=job.source_id, skills=candidates))
+    return candidate_jobs
+
+
+def _deterministic_resume_skills(known_skills: list[str], resume_text: str) -> list[str]:
+    return sorted(skill for skill in known_skills if _skill_in_resume(skill, resume_text))
+
+
 def _skill_in_resume(skill: str, resume_text: str) -> bool:
     normalized_skill = _clean_skill(skill)
     if not normalized_skill:
@@ -361,82 +424,6 @@ def _skill_in_resume(skill: str, resume_text: str) -> bool:
         if re.search(pattern, resume_text, flags=re.IGNORECASE):
             return True
     return False
-
-
-def _create_gemini_client() -> tuple[Any | None, Any | None, str | None]:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        return None, None, "[Gemini Error] Missing GEMINI_API_KEY or GOOGLE_API_KEY."
-    try:
-        from google import genai
-        from google.genai import types
-    except ImportError:
-        return None, None, "[Dependency Error] Missing package: google-genai"
-    return genai.Client(api_key=api_key), types, None
-
-
-async def _validate_batch_with_gemini(
-    batch_index: int,
-    batch: list[JobSkills],
-    gemini: Any,
-    types: Any,
-    retry_delay_seconds: int,
-    max_retries: int,
-) -> tuple[list[GeminiJobSkills] | None, int, str | None]:
-    prompt = _build_optimized_prompt(batch)
-    total_tokens = 0
-    last_error = "Unknown Gemini error"
-
-    for attempt in range(1, max_retries + 1):
-        try:
-            response = await gemini.aio.models.generate_content(
-                model=DEFAULT_MODEL,
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    temperature=0,
-                    seed=0,
-                    response_mime_type="application/json",
-                    response_schema=list[GeminiJobSkills],
-                ),
-            )
-            response_text = getattr(response, "text", "") or ""
-            total_tokens += _response_token_count(response, prompt, response_text)
-            results = _parse_and_validate_response(response_text, batch)
-            return results, total_tokens, None
-        except Exception as exc:  # noqa: BLE001 - retry without exposing stack traces.
-            last_error = _short_error(exc)
-            print(f"[Batch {batch_index}] Attempt {attempt} failed: {last_error}")
-            if attempt < max_retries:
-                await asyncio.sleep(retry_delay_seconds)
-
-    return None, total_tokens, f"[Gemini Error] Batch {batch_index}: {last_error}"
-
-
-def _parse_and_validate_response(
-    response_text: str,
-    batch: list[JobSkills],
-) -> list[GeminiJobSkills]:
-    if not response_text.strip():
-        raise ValueError("Gemini returned an empty response")
-
-    payload = json.loads(response_text)
-    if not isinstance(payload, list) or not payload:
-        raise ValueError("Gemini response must be a non-empty JSON array")
-
-    results = [GeminiJobSkills.model_validate(item) for item in payload]
-    expected = {job.source_id: set(job.skills) for job in batch}
-    actual_ids = [result.source_id for result in results]
-    if len(actual_ids) != len(set(actual_ids)) or set(actual_ids) != set(expected):
-        raise ValueError("Gemini response source_id values do not match the batch")
-
-    for result in results:
-        if not result.skills:
-            raise ValueError(f"Gemini returned no skills for source_id {result.source_id}")
-        normalized = [_clean_skill(skill) for skill in result.skills]
-        if any(not skill or skill not in expected[result.source_id] for skill in normalized):
-            raise ValueError(f"Gemini returned a skill outside the allowlist for {result.source_id}")
-        result.skills = sorted(set(normalized))
-    return sorted(results, key=lambda item: item.source_id)
 
 
 def _build_baseline_prompt(batch: list[JobSkills]) -> str:
@@ -462,65 +449,6 @@ def _build_optimized_prompt(batch: list[JobSkills]) -> str:
         'Schema: [{"source_id":"...","skills":["..."]}]\n'
         f"Data: {json.dumps(payload, ensure_ascii=True, separators=(',', ':'))}"
     )
-
-
-def _cache_key(resume_hash: str, batch: list[JobSkills]) -> str:
-    payload = {
-        "resume_hash": resume_hash,
-        "candidates": [job.model_dump() for job in sorted(batch, key=lambda item: item.source_id)],
-        "model": DEFAULT_MODEL,
-        "prompt_version": PROMPT_VERSION,
-    }
-    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=True, separators=(",", ":"))
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _load_cached_results(
-    cache_key: str,
-    batch: list[JobSkills],
-) -> list[GeminiJobSkills] | None:
-    path = CACHE_DIR / f"{cache_key}.json"
-    if not path.is_file():
-        return None
-    try:
-        entry = CacheEntry.model_validate_json(path.read_text(encoding="utf-8"))
-        if (
-            entry.cache_key != cache_key
-            or entry.model != DEFAULT_MODEL
-            or entry.prompt_version != PROMPT_VERSION
-        ):
-            return None
-        payload = json.dumps([item.model_dump() for item in entry.results])
-        return _parse_and_validate_response(payload, batch)
-    except Exception:  # noqa: BLE001 - malformed cache entries are ignored.
-        return None
-
-
-def _write_cache(
-    cache_key: str,
-    results: list[GeminiJobSkills],
-) -> None:
-    try:
-        CACHE_DIR.mkdir(parents=True, exist_ok=True)
-        entry = CacheEntry(
-            cache_key=cache_key,
-            model=DEFAULT_MODEL,
-            prompt_version=PROMPT_VERSION,
-            results=results,
-        )
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            encoding="utf-8",
-            dir=CACHE_DIR,
-            prefix=f"{cache_key}.",
-            suffix=".tmp",
-            delete=False,
-        ) as temp_file:
-            temp_file.write(entry.model_dump_json(indent=2))
-            temp_path = Path(temp_file.name)
-        os.replace(temp_path, CACHE_DIR / f"{cache_key}.json")
-    except Exception:  # noqa: BLE001 - cache failures must not fail analysis.
-        return
 
 
 def _demand_statistics(
@@ -549,53 +477,6 @@ def _demand_summary(
     top_gaps = sorted(gap for gap, count in demand_by_gap.items() if count == highest_count)
     percentages = list(demand_percentage_by_gap.values())
     return top_gaps, round(max(percentages) - min(percentages), 2)
-
-
-def calculate_retry_delay_seconds(requests_per_minute: int) -> int:
-    if requests_per_minute <= 0:
-        raise ValueError("requests_per_minute must be greater than zero")
-    return math.ceil(60 / requests_per_minute)
-
-
-def calculate_batch_size(
-    total_items: int,
-    requests_per_day: int,
-    reliability_floor: int = DEFAULT_BATCH_SIZE,
-) -> int:
-    if total_items < 0:
-        raise ValueError("total_items cannot be negative")
-    if requests_per_day <= 0:
-        raise ValueError("requests_per_day must be greater than zero")
-    if reliability_floor <= 0:
-        raise ValueError("reliability_floor must be greater than zero")
-    minimum_batch_size = math.ceil(total_items / requests_per_day)
-    return max(minimum_batch_size, reliability_floor)
-
-
-def _read_model_rate_limits(model: str) -> tuple[int, int]:
-    if not RATE_LIMITS_PATH.is_file():
-        raise FileNotFoundError(f"Rate-limit file not found: {RATE_LIMITS_PATH}")
-    for line in RATE_LIMITS_PATH.read_text(encoding="utf-8").splitlines():
-        parts = line.split()
-        if len(parts) >= 4 and parts[0] == model:
-            return int(_parse_quantity(parts[1])), int(_parse_quantity(parts[3]))
-    raise ValueError(f"No rate limits configured for model: {model}")
-
-
-def _parse_quantity(value: str) -> float:
-    value = value.strip().upper()
-    multipliers = {"K": 1_000, "M": 1_000_000, "B": 1_000_000_000}
-    if value[-1] in multipliers:
-        return float(value[:-1]) * multipliers[value[-1]]
-    return float(value)
-
-
-def _response_token_count(response: Any, prompt: str, response_text: str) -> int:
-    usage = getattr(response, "usage_metadata", None)
-    total = getattr(usage, "total_token_count", None) if usage else None
-    if isinstance(total, int) and total > 0:
-        return total
-    return _estimate_tokens(prompt) + _estimate_tokens(response_text)
 
 
 def _estimate_tokens(text: str) -> int:

@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Resume Skill Gap Analyzer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" crossorigin="anonymous">
+    <style>
+      body {
+        min-height: 100vh;
+        background: #f6f7f9;
+        color: #172033;
+      }
+
+      .hero {
+        min-height: min(74vh, 680px);
+        background:
+          linear-gradient(90deg, rgba(5, 10, 22, 0.82), rgba(5, 10, 22, 0.38)),
+          url("https://images.unsplash.com/photo-1558494949-ef010cbdcc31?auto=format&fit=crop&w=1800&q=80") center / cover;
+        color: #ffffff;
+        display: flex;
+        align-items: center;
+      }
+
+      .hero-copy {
+        max-width: 760px;
+      }
+
+      .hero h1 {
+        font-size: clamp(2.5rem, 6vw, 5.2rem);
+        line-height: 0.95;
+        letter-spacing: 0;
+      }
+
+      .nav-link {
+        color: rgba(255, 255, 255, 0.86);
+      }
+
+      .nav-link:hover,
+      .nav-link:focus {
+        color: #ffffff;
+      }
+
+      .section-band {
+        padding: 4rem 0;
+      }
+
+      .step-card,
+      .service-card {
+        border: 1px solid #d9dee7;
+        border-radius: 8px;
+        background: #ffffff;
+        height: 100%;
+      }
+
+      .step-number {
+        width: 2.25rem;
+        height: 2.25rem;
+        display: inline-grid;
+        place-items: center;
+        border-radius: 999px;
+        background: #0f766e;
+        color: #ffffff;
+        font-weight: 700;
+      }
+
+      .service-tag {
+        display: inline-flex;
+        align-items: center;
+        min-height: 2rem;
+        border-radius: 999px;
+        padding: 0.2rem 0.75rem;
+        font-size: 0.85rem;
+        background: #eef2ff;
+        color: #3730a3;
+      }
+
+      .pipeline-strip {
+        border-block: 1px solid #d9dee7;
+        background: #ffffff;
+      }
+
+      .pipeline-item {
+        border-left: 4px solid #0f766e;
+      }
+
+      .command-box {
+        background: #101828;
+        color: #d1fadf;
+        border-radius: 8px;
+        overflow-wrap: anywhere;
+      }
+
+      @media (max-width: 575.98px) {
+        .hero {
+          min-height: 78vh;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="container py-4">
+        <nav class="d-flex align-items-center justify-content-between gap-3 mb-5">
+          <a class="navbar-brand text-white fw-semibold" href="/">Resume Skill Gap Analyzer</a>
+          <div class="d-flex gap-3">
+            <a class="nav-link p-0" href="/chat">Chat</a>
+            <a class="nav-link p-0" href="/dashboard">Dashboard</a>
+          </div>
+        </nav>
+
+        <div class="hero-copy">
+          <p class="text-uppercase fw-semibold mb-3">Week 3 System Integration</p>
+          <h1 class="fw-bold mb-4">Resume Skill Gap Analyzer</h1>
+          <p class="lead mb-4">
+            A containerized AI pipeline that compares resume text against job-market skills,
+            visualizes the job database, and explains the highest-demand gaps through a local model.
+          </p>
+          <div class="d-flex flex-wrap gap-2">
+            <a class="btn btn-light btn-lg" href="/chat">Open Chat</a>
+            <a class="btn btn-outline-light btn-lg" href="/dashboard">View Dashboard</a>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <main>
+      <section class="pipeline-strip py-4">
+        <div class="container">
+          <div class="row g-3">
+            <div class="col-12 col-md-3">
+              <div class="pipeline-item ps-3">
+                <div class="fw-semibold">Frontend</div>
+                <div class="text-secondary small">FastAPI, Bootstrap, PDF.js</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-3">
+              <div class="pipeline-item ps-3">
+                <div class="fw-semibold">Backend</div>
+                <div class="text-secondary small">FastAPI, Week 2 workflow</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-3">
+              <div class="pipeline-item ps-3">
+                <div class="fw-semibold">Model</div>
+                <div class="text-secondary small">Ollama, qwen3.5:4b</div>
+              </div>
+            </div>
+            <div class="col-12 col-md-3">
+              <div class="pipeline-item ps-3">
+                <div class="fw-semibold">Orchestration</div>
+                <div class="text-secondary small">Docker Compose network</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-band">
+        <div class="container">
+          <div class="row g-4 align-items-stretch">
+            <div class="col-12 col-lg-4">
+              <article class="step-card p-4">
+                <span class="step-number mb-3">1</span>
+                <h2 class="h4">Extract Resume Text</h2>
+                <p class="mb-0 text-secondary">
+                  The browser reads typed messages and PDF uploads, then sends clean text through
+                  the frontend proxy so Compose networking stays internal.
+                </p>
+              </article>
+            </div>
+            <div class="col-12 col-lg-4">
+              <article class="step-card p-4">
+                <span class="step-number mb-3">2</span>
+                <h2 class="h4">Find Skill Gaps</h2>
+                <p class="mb-0 text-secondary">
+                  The backend calls the copied Week 2 workflow and compares resume skills against
+                  the SQLite job database to calculate demand-ranked gaps.
+                </p>
+              </article>
+            </div>
+            <div class="col-12 col-lg-4">
+              <article class="step-card p-4">
+                <span class="step-number mb-3">3</span>
+                <h2 class="h4">Explain Results</h2>
+                <p class="mb-0 text-secondary">
+                  Ollama generates a concise explanation when available; deterministic gap data
+                  still returns if the local model or API key is missing.
+                </p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section-band bg-white">
+        <div class="container">
+          <div class="row g-4">
+            <div class="col-12 col-lg-6">
+              <h2 class="h3">Run the full system</h2>
+              <p class="text-secondary">
+                Compose builds the frontend and backend images, starts Ollama, and puts the services
+                on one private network so containers resolve each other by service name.
+              </p>
+              <div class="command-box p-3 mb-3">
+                <code>cd week_3<br>docker compose up --build</code>
+              </div>
+              <p class="mb-0 text-secondary">
+                Open the frontend at <code>http://127.0.0.1:8000</code>. The backend health endpoint
+                remains available at <code>http://127.0.0.1:8001</code>.
+              </p>
+            </div>
+            <div class="col-12 col-lg-6">
+              <div class="row g-3">
+                <div class="col-12 col-sm-6">
+                  <article class="service-card p-3">
+                    <span class="service-tag mb-3">frontend</span>
+                    <h3 class="h5">User interface</h3>
+                    <p class="mb-0 text-secondary">Landing page, chat, PDF extraction, and dashboard.</p>
+                  </article>
+                </div>
+                <div class="col-12 col-sm-6">
+                  <article class="service-card p-3">
+                    <span class="service-tag mb-3">backend</span>
+                    <h3 class="h5">Skill analysis</h3>
+                    <p class="mb-0 text-secondary">Week 2 gap finder exposed through <code>/chat</code>.</p>
+                  </article>
+                </div>
+                <div class="col-12 col-sm-6">
+                  <article class="service-card p-3">
+                    <span class="service-tag mb-3">ollama</span>
+                    <h3 class="h5">Local model</h3>
+                    <p class="mb-0 text-secondary">Default model is <code>qwen3.5:4b</code>.</p>
+                  </article>
+                </div>
+                <div class="col-12 col-sm-6">
+                  <article class="service-card p-3">
+                    <span class="service-tag mb-3">secrets</span>
+                    <h3 class="h5">Optional config</h3>
+                    <p class="mb-0 text-secondary">Docker secrets can provide Ollama host and model settings.</p>
+                  </article>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

@@ -5,32 +5,19 @@ import os
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
-
-from dotenv import load_dotenv
 
 
-BASE_DIR = Path(__file__).resolve().parent
-GEMINI_MODELS = {
-    "gemini-2.5-flash",
-    "gemini-2.5-flash-lite",
-    "gemini-3-flash-preview",
-    "gemini-3.1-flash-lite",
-    "gemini-3.5-flash",
-}
-
-load_dotenv(BASE_DIR / ".env")
-
-OLLAMA_HOST = os.getenv("OLLAMA_HOST", "http://127.0.0.1:11434").rstrip("/")
+DEFAULT_OLLAMA_HOST = "http://127.0.0.1:11434"
 OLLAMA_MODEL_ALIASES = {
     "deepseek-r1": "deepseek-r1:1.5b",
     "qwen3.5": "qwen3.5:4b",
 }
-REQUEST_TIMEOUT_SECONDS = 120
+REQUEST_TIMEOUT_SECONDS = int(os.getenv("OLLAMA_TIMEOUT_SECONDS", "180"))
+OLLAMA_NUM_PREDICT = int(os.getenv("OLLAMA_NUM_PREDICT", "192"))
 
 
-def prompt_model(model: str, prompt: str) -> str:
-    """Prompt a Gemini or local Ollama model and return a text response."""
+def prompt_model(model: str, prompt: str, num_predict: int | None = None) -> str:
+    """Prompt a local Ollama model and return a text response."""
     clean_model = model.strip()
     clean_prompt = prompt.strip()
 
@@ -39,32 +26,10 @@ def prompt_model(model: str, prompt: str) -> str:
     if not clean_prompt:
         return "[Input Error] Prompt is required."
 
-    if clean_model in GEMINI_MODELS:
-        return _prompt_gemini(clean_model, clean_prompt)
-
-    return _prompt_ollama(clean_model, clean_prompt)
+    return _prompt_ollama(clean_model, clean_prompt, num_predict)
 
 
-def _prompt_gemini(model: str, prompt: str) -> str:
-    api_key = os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY")
-    if not api_key:
-        return "[Gemini Error] Missing GEMINI_API_KEY or GOOGLE_API_KEY environment variable."
-
-    try:
-        from google import genai
-    except ImportError:
-        return "[Gemini Error] Missing dependency: install google-genai with uv."
-
-    try:
-        client = genai.Client(api_key=api_key)
-        response = client.models.generate_content(model=model, contents=prompt)
-        text = getattr(response, "text", None)
-        return text if text else str(response)
-    except Exception as exc:  # noqa: BLE001 - CLI must not expose stack traces.
-        return f"[Gemini Error] {exc}"
-
-
-def _prompt_ollama(model: str, prompt: str) -> str:
+def _prompt_ollama(model: str, prompt: str, num_predict: int | None) -> str:
     try:
         resolved_model = _resolve_ollama_model(model)
         response = _post_ollama_json(
@@ -74,6 +39,7 @@ def _prompt_ollama(model: str, prompt: str) -> str:
                 "prompt": prompt,
                 "stream": False,
                 "think": False,
+                "options": {"num_predict": num_predict or OLLAMA_NUM_PREDICT},
             },
         )
         text = response.get("response")
@@ -121,15 +87,17 @@ def _list_ollama_models() -> list[str]:
 
 
 def _get_ollama_json(path: str) -> dict:
+    ollama_host = os.getenv("OLLAMA_HOST", DEFAULT_OLLAMA_HOST).rstrip("/")
     with urllib.request.urlopen(
-        f"{OLLAMA_HOST}{path}", timeout=REQUEST_TIMEOUT_SECONDS
+        f"{ollama_host}{path}", timeout=REQUEST_TIMEOUT_SECONDS
     ) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def _post_ollama_json(path: str, payload: dict) -> dict:
+    ollama_host = os.getenv("OLLAMA_HOST", DEFAULT_OLLAMA_HOST).rstrip("/")
     request = urllib.request.Request(
-        f"{OLLAMA_HOST}{path}",
+        f"{ollama_host}{path}",
         data=json.dumps(payload).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",

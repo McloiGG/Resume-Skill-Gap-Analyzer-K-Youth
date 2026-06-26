@@ -4,3 +4,4 @@ src/__pycache__/
 .ruff_cache/
 .venv*/
 .skill_gap_cache/
+.env

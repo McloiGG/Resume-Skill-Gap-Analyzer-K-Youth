@@ -1,13 +1,13 @@
 [project]
-name = "week-2"
+name = "backend"
 version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
+description = "Week 3 backend service"
 requires-python = "==3.14.*"
 dependencies = [
+    "fastapi==0.138.0",
     "fastmcp==3.4.2",
-    "google-genai==2.8.0",
     "pydantic==2.13.4",
     "python-dotenv==1.2.2",
     "ruff==0.15.*",
+    "uvicorn==0.49.0",
 ]
